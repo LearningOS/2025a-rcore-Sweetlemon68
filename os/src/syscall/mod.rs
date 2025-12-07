@@ -20,6 +20,8 @@ const SYSCALL_YIELD: usize = 124;
 const SYSCALL_GET_TIME: usize = 169;
 /// trace syscall
 const SYSCALL_TRACE: usize = 410;
+/// total number of supported syscalls
+pub const SYSCALL_COUNT: usize = 5;
 
 mod fs;
 mod process;
@@ -29,6 +31,8 @@ use process::*;
 
 /// handle syscall exception with `syscall_id` and other arguments
 pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
+    let syscall_idx = get_syscall_count_index(syscall_id).unwrap();
+    crate::task::inc_current_thread_syscall_count(syscall_idx);
     match syscall_id {
         SYSCALL_WRITE => sys_write(args[0], args[1] as *const u8, args[2]),
         SYSCALL_EXIT => sys_exit(args[0] as i32),
@@ -36,5 +40,17 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
         SYSCALL_GET_TIME => sys_get_time(args[0] as *mut TimeVal, args[1]),
         SYSCALL_TRACE => sys_trace(args[0], args[1], args[2]),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
+    }
+}
+
+/// get the index of syscall count array for a given syscall id
+pub fn get_syscall_count_index(syscall_id: usize) -> Option<usize> {
+    match syscall_id {
+        SYSCALL_WRITE => Some(0),
+        SYSCALL_EXIT => Some(1),
+        SYSCALL_YIELD => Some(2),
+        SYSCALL_GET_TIME => Some(3),
+        SYSCALL_TRACE => Some(4),
+        _ => None,
     }
 }

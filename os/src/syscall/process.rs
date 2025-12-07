@@ -38,8 +38,33 @@ pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     0
 }
 
-// TODO: implement the syscall
-pub fn sys_trace(_trace_request: usize, _id: usize, _data: usize) -> isize {
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
     trace!("kernel: sys_trace");
-    -1
+    match trace_request {
+        0 => {
+            // id should be regarded as *const u8, and return one byte data
+            let addr = id as *const u8;
+            unsafe {
+                let data = *addr;
+                data as isize
+            }
+        }
+        1 => {
+            // id should be regarded as *mut u8, and data is one byte data
+            let addr = id as *mut u8;
+            let data = data as u8;
+            unsafe {
+                *addr = data;
+            }
+            0
+        }
+        2 => {
+            // id should be regarded as syscall id, and return count of this syscall
+            let syscall_idx = super::get_syscall_count_index(id).unwrap();
+            crate::task::get_current_thread_syscall_count(syscall_idx) as isize
+        }
+        _ => {
+            panic!("Unsupported trace_request: {}", trace_request);
+        }
+    }
 }
