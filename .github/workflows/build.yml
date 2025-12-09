@@ -74,6 +74,7 @@ jobs:
           cat classroom/latest.json
           score=$(( $(grep -o 'ch' classroom/latest.json | wc -l) * 100))
           echo $score
+          echo ${{ github.actor }}
 
           score_json=$(jq -n \
             --arg channel github \
@@ -82,6 +83,7 @@ jobs:
             --argjson score $score \
             --argjson totalScore 500 \
             '{channel: $channel, courseId: $courseId, name: $name, score: $score, totalScore: $totalScore}')
+          echo $score_json
 
           response=$(curl -X POST ${{ secrets.COURSE_POST_API }} \
             -H "accept: application/json;charset=utf-8" \
