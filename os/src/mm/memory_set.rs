@@ -247,6 +247,20 @@ impl MemorySet {
             false
         }
     }
+    /// unmap the area starting from start
+    pub fn unmap_area(&mut self, start: VirtAddr) -> bool {
+        if let Some(index) = self
+            .areas
+            .iter()
+            .position(|area| area.vpn_range.get_start() == start.floor())
+        {
+            let mut area = self.areas.remove(index);
+            area.unmap(&mut self.page_table);
+            true
+        } else {
+            false
+        }
+    }
 
     /// append the area to new_end
     #[allow(unused)]

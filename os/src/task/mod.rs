@@ -153,6 +153,26 @@ impl TaskManager {
             panic!("All applications completed!");
         }
     }
+
+    /// Compute with TCB of current task
+    /// Input a closure `f` that takes a mutable reference to current TCB
+    /// and returns a value of type `R`
+    pub fn compute_current_tcb<R, F: FnOnce(&TaskControlBlock) -> R>(&self, f: F) -> R {
+        let inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        let tcb = &inner.tasks[cur];
+        f(tcb)
+    }
+
+    /// Compute with TCB of current task mutably
+    /// Input a closure `f` that takes a mutable reference to current TCB
+    /// and returns a value of type `R`
+    pub fn compute_current_tcb_mut<R, F: FnOnce(&mut TaskControlBlock) -> R>(&self, f: F) -> R {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        let tcb = &mut inner.tasks[cur];
+        f(tcb)
+    }
 }
 
 /// Run the first task in task list.
@@ -201,4 +221,18 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// Increment the syscall count for the current thread for a given syscall idx
+pub fn inc_current_thread_syscall_count(syscall_idx: usize) {
+    let mut inner = TASK_MANAGER.inner.exclusive_access();
+    let cur = inner.current_task;
+    inner.tasks[cur].syscall_count[syscall_idx] += 1;
+}
+
+/// Get the syscall count for the current thread for a given syscall index
+pub fn get_current_thread_syscall_count(syscall_idx: usize) -> usize {
+    let inner = TASK_MANAGER.inner.exclusive_access();
+    let cur = inner.current_task;
+    inner.tasks[cur].syscall_count[syscall_idx]
 }
