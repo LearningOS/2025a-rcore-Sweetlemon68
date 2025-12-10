@@ -1,13 +1,15 @@
 //! Process management syscalls
+use core::mem::size_of;
+
 use alloc::sync::Arc;
 
 use crate::{
     loader::get_app_data_by_name,
-    mm::{translated_refmut, translated_str},
+    mm::{VirtAddr, translated_byte_buffer, translated_refmut, translated_str},
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
         suspend_current_and_run_next,
-    },
+    }, timer::get_time_us,
 };
 
 #[repr(C)]
@@ -102,33 +104,95 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     // ---- release current PCB automatically
 }
 
-/// YOUR JOB: get time with second and microsecond
-/// HINT: You might reimplement it with virtual memory management.
-/// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+/// get time with second and microsecond
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_get_time",
         current_task().unwrap().pid.0
     );
-    -1
+    // get addr of sec and usec in TimeVal
+    unsafe {
+        let sec_addr = &mut (*ts).sec as *mut usize as *mut u8;
+        let usec_addr = &mut (*ts).usec as *mut usize as *mut u8;
+        let us = get_time_us();
+        let sec = us / 1_000_000;
+        let usec = us % 1_000_000;
+        // write sec and usec to user space
+        let sec_buf = &mut translated_byte_buffer(current_user_token(), sec_addr, size_of::<usize>())[0];
+        let usec_buf = &mut translated_byte_buffer(current_user_token(), usec_addr, size_of::<usize>())[0];
+        sec_buf.copy_from_slice(&sec.to_ne_bytes());
+        usec_buf.copy_from_slice(&usec.to_ne_bytes());
+    }
+    0
 }
 
-/// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
+/// mmap.
+pub fn sys_mmap(start: usize, len: usize, prop: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_mmap",
         current_task().unwrap().pid.0
     );
-    -1
+    let start_va = VirtAddr(start);
+    // If address start is not aligned to page size, return -1
+    if !start_va.aligned() {
+        return -1;
+    }
+    // Check prop: 1-R, 2-W, 4-X; other bits must be set to 0
+    if (prop & !0x7) != 0 || prop & 0x7 == 0 {
+        return -1;
+    }
+    // Convert prop to MapPermission
+    use crate::mm::MapPermission;
+    let mut permission = MapPermission::U;
+    if (prop & 0x1) != 0 {
+        permission |= MapPermission::R;
+    }
+    if (prop & 0x2) != 0 {
+        permission |= MapPermission::W;
+    }
+    if (prop & 0x4) != 0 {
+        permission |= MapPermission::X;
+    }
+    let end_va = VirtAddr(start + len);
+    let cur_task = crate::task::current_task().unwrap();
+    let mut tcb = cur_task.inner_exclusive_access();
+    for vpn in start_va.floor().0..end_va.ceil().0 {
+        if let Some(pte) = tcb.memory_set.translate(vpn.into()) {
+            if pte.is_valid() {
+                return -1;
+            }
+        }
+    }
+    // Allocate and map pages
+    tcb.memory_set.insert_framed_area(start_va, end_va, permission);
+    0
 }
 
-/// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
+/// munmap.
+pub fn sys_munmap(start: usize, len: usize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_munmap",
         current_task().unwrap().pid.0
     );
-    -1
+    let start_va = VirtAddr(start);
+    // If address start is not aligned to page size, return -1
+    if !start_va.aligned() {
+        return -1;
+    }
+    let end_va = VirtAddr(start + len);
+    let cur_task = crate::task::current_task().unwrap();
+    let mut tcb = cur_task.inner_exclusive_access();
+    for vpn in start_va.floor().0..end_va.ceil().0 {
+        if let Some(pte) = tcb.memory_set.translate(vpn.into()) {
+            if !pte.is_valid() {
+                return -1;
+            }
+        } else {
+            return -1;
+        }
+    }
+    tcb.memory_set.remove_area_with_start_vpn(start_va.floor());
+    0
 }
 
 /// change data segment size
