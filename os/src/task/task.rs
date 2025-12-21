@@ -95,7 +95,7 @@ pub struct TaskControlBlockInner {
 
     /// It is set when active exit or execution error occurs
     pub exit_code: i32,
-    pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    pub fd_table: Vec<Option<(Arc<dyn File + Send + Sync>, u32)>>,
 
     /// Heap bottom
     pub heap_bottom: usize,
@@ -164,11 +164,11 @@ impl TaskControlBlock {
                     exit_code: 0,
                     fd_table: vec![
                         // 0 -> stdin
-                        Some(Arc::new(Stdin)),
+                        Some((Arc::new(Stdin), 0)),
                         // 1 -> stdout
-                        Some(Arc::new(Stdout)),
+                        Some((Arc::new(Stdout), 0)),
                         // 2 -> stderr
-                        Some(Arc::new(Stdout)),
+                        Some((Arc::new(Stdout), 0)),
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
@@ -216,11 +216,11 @@ impl TaskControlBlock {
                     exit_code: 0,
                     fd_table: vec![
                         // 0 -> stdin
-                        Some(Arc::new(Stdin)),
+                        Some((Arc::new(Stdin), 0)),
                         // 1 -> stdout
-                        Some(Arc::new(Stdout)),
+                        Some((Arc::new(Stdout), 0)),
                         // 2 -> stderr
-                        Some(Arc::new(Stdout)),
+                        Some((Arc::new(Stdout), 0)),
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
@@ -285,10 +285,10 @@ impl TaskControlBlock {
         let kernel_stack = kstack_alloc();
         let kernel_stack_top = kernel_stack.get_top();
         // copy fd table
-        let mut new_fd_table: Vec<Option<Arc<dyn File + Send + Sync>>> = Vec::new();
+        let mut new_fd_table: Vec<Option<(Arc<dyn File + Send + Sync>, u32)>> = Vec::new();
         for fd in parent_inner.fd_table.iter() {
-            if let Some(file) = fd {
-                new_fd_table.push(Some(file.clone()));
+            if let Some((file, inode_id)) = fd {
+                new_fd_table.push(Some((file.clone(), *inode_id)));
             } else {
                 new_fd_table.push(None);
             }

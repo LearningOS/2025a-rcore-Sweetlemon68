@@ -6,6 +6,7 @@
 //! need to wrap `OSInodeInner` into `UPSafeCell`
 use super::File;
 use crate::drivers::BLOCK_DEVICE;
+use crate::fs::{Stat, StatMode};
 use crate::mm::UserBuffer;
 use crate::sync::UPSafeCell;
 use alloc::sync::Arc;
@@ -123,6 +124,46 @@ pub fn open_file(name: &str, flags: OpenFlags) -> Option<Arc<OSInode>> {
             Arc::new(OSInode::new(readable, writable, inode))
         })
     }
+}
+
+/// Create a new hard link
+pub fn link_file(old_name: &str, new_name: &str) -> bool {
+    ROOT_INODE.hard_link(old_name, new_name)
+}
+
+/// Remove a hard link; deallocate inode and data blocks if no remaining links
+pub fn unlink_file(name: &str) -> bool {
+    ROOT_INODE.remove_hard_link(name)
+}
+
+/// Get the stat of a file by fd
+pub fn stat_file(fd: usize) -> Option<Stat> {
+    let task = crate::task::current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    if fd >= inner.fd_table.len() {
+        return None;
+    }
+    if let Some((_file, inode_id)) = &inner.fd_table[fd] {
+        let (is_dir, ref_count) = ROOT_INODE.stat(*inode_id);
+        Some(Stat {
+            dev: 0,
+            ino: *inode_id as u64,
+            mode: if is_dir {
+                StatMode::DIR
+            } else {
+                StatMode::FILE
+            },
+            nlink: ref_count,
+            pad: [0; 7],
+        })
+    } else {
+        None
+    }
+}
+
+/// Get inode id by file path
+pub fn get_inode_id(path: &str) -> Option<u32> {
+    ROOT_INODE.get_inode_id(path)
 }
 
 impl File for OSInode {
