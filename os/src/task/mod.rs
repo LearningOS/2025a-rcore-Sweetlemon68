@@ -32,6 +32,11 @@ use switch::__switch;
 pub use context::TaskContext;
 pub use id::{kstack_alloc, pid_alloc, KernelStack, PidHandle, IDLE_PID};
 pub use manager::{add_task, pid2process, remove_from_pid2process, remove_task, wakeup_task};
+pub use process::{
+    add_to_mutex_waiting_matrix, add_to_semaphore_waiting_matrix, check_mutex_deadlock,
+    check_semaphore_deadlock, move_to_mutex_holding_matrix,
+    move_to_semaphore_holding_matrix, remove_from_mutex_holding_matrix, remove_from_semaphore_holding_matrix
+};
 pub use processor::{
     current_kstack_top, current_process, current_task, current_trap_cx, current_trap_cx_user_va,
     current_user_token, run_tasks, schedule, take_current_task,

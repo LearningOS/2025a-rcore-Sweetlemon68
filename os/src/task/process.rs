@@ -45,10 +45,20 @@ pub struct ProcessControlBlockInner {
     pub task_res_allocator: RecycleAllocator,
     /// mutex list
     pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
+    /// mutex waiting matrix
+    pub mutex_waiting_matrix: Vec<Vec<usize>>,
+    /// mutex holding matrix
+    pub mutex_holding_matrix: Vec<Vec<usize>>,
     /// semaphore list
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
+    /// semaphore waiting matrix
+    pub semaphore_waiting_matrix: Vec<Vec<usize>>,
+    /// semaphore holding matrix
+    pub semaphore_holding_matrix: Vec<Vec<usize>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// whether deadlock detection is enabled
+    pub enable_deadlock_detection: bool,
 }
 
 impl ProcessControlBlockInner {
@@ -117,8 +127,13 @@ impl ProcessControlBlock {
                     tasks: Vec::new(),
                     task_res_allocator: RecycleAllocator::new(),
                     mutex_list: Vec::new(),
+                    mutex_waiting_matrix: Vec::new(),
+                    mutex_holding_matrix: Vec::new(),
                     semaphore_list: Vec::new(),
+                    semaphore_waiting_matrix: Vec::new(),
+                    semaphore_holding_matrix: Vec::new(),
                     condvar_list: Vec::new(),
+                    enable_deadlock_detection: false,
                 })
             },
         });
@@ -245,6 +260,11 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    mutex_waiting_matrix: Vec::new(),
+                    mutex_holding_matrix: Vec::new(),
+                    semaphore_waiting_matrix: Vec::new(),
+                    semaphore_holding_matrix: Vec::new(),
+                    enable_deadlock_detection: parent.enable_deadlock_detection,
                 })
             },
         });
@@ -282,4 +302,164 @@ impl ProcessControlBlock {
     pub fn getpid(&self) -> usize {
         self.pid.0
     }
+}
+
+pub fn check_deadlock(
+    work: &mut [isize],
+    allocation_matrix: &Vec<Vec<usize>>,
+    need_matrix: &Vec<Vec<usize>>,
+) -> bool {
+    let thread_count = allocation_matrix.len();
+    let res_count = if thread_count > 0 {
+        allocation_matrix[0].len()
+    } else {
+        0
+    };
+    let mut finish = vec![false; thread_count];
+    loop {
+        let mut found = false;
+        for i in 0..thread_count {
+            if !finish[i]
+                && (0..res_count).all(|j| need_matrix[i][j] as isize <= work[j])
+            {
+                for j in 0..res_count {
+                    work[j] += allocation_matrix[i][j] as isize;
+                }
+                finish[i] = true;
+                found = true;
+            }
+        }
+        if !found {
+            break;
+        }
+    }
+    for i in 0..thread_count {
+        if !finish[i] {
+            return true;
+        }
+    }
+    false
+}
+
+/// Add tid to the waiting matrix of the mutex_id
+pub fn add_to_mutex_waiting_matrix(
+    process_inner: &mut ProcessControlBlockInner,
+    tid: usize,
+    mutex_id: usize,
+) {
+    process_inner.mutex_waiting_matrix[mutex_id].push(tid);
+}
+
+/// Move tid from the waiting matrix to the holding matrix of the mutex_id
+pub fn move_to_mutex_holding_matrix(
+    process_inner: &mut ProcessControlBlockInner,
+    tid: usize,
+    mutex_id: usize,
+) {
+    if let Some(index) = process_inner.mutex_waiting_matrix[mutex_id]
+        .iter()
+        .position(|&id| id == tid)
+    {
+        process_inner.mutex_waiting_matrix[mutex_id].swap_remove(index);
+    }
+    process_inner.mutex_holding_matrix[mutex_id].push(tid);
+}
+
+/// Remove tid from the holding matrix of the mutex_id
+pub fn remove_from_mutex_holding_matrix(
+    process_inner: &mut ProcessControlBlockInner,
+    tid: usize,
+    mutex_id: usize,
+) {
+    if let Some(index) = process_inner.mutex_holding_matrix[mutex_id]
+        .iter()
+        .position(|&id| id == tid)
+    {
+        process_inner.mutex_holding_matrix[mutex_id].swap_remove(index);
+    }
+}
+
+/// Check whether acquiring the mutex_id by the task with tid would cause a deadlock
+pub fn check_mutex_deadlock(
+    process_inner: &ProcessControlBlockInner,
+    tid: usize,
+    mutex_id: usize,
+) -> bool {
+    let mut work = process_inner.mutex_list.iter().map(|lock_opt| {
+        lock_opt.as_ref().map_or(0, |lock| if lock.is_locked() { 0 } else { 1 })
+    }).collect::<Vec<_>>();
+    let allocation_matrix = calc_allocation_matrix(&process_inner.mutex_holding_matrix, process_inner.thread_count());
+    let mut need_matrix = calc_allocation_matrix(&process_inner.mutex_waiting_matrix, process_inner.thread_count());
+    need_matrix[tid][mutex_id] += 1; // simulate the new request
+    check_deadlock(&mut work, &allocation_matrix, &need_matrix)
+}
+
+/// Add tid to the waiting matrix of the semaphore_id
+pub fn add_to_semaphore_waiting_matrix(
+    process_inner: &mut ProcessControlBlockInner,
+    tid: usize,
+    sem_id: usize,
+) {
+    process_inner.semaphore_waiting_matrix[sem_id].push(tid);
+}
+
+/// Move tid from the waiting matrix to the holding matrix of the semaphore_id
+pub fn move_to_semaphore_holding_matrix(
+    process_inner: &mut ProcessControlBlockInner,
+    tid: usize,
+    sem_id: usize,
+) {
+    if let Some(index) = process_inner.semaphore_waiting_matrix[sem_id]
+        .iter()
+        .position(|&id| id == tid)
+    {
+        process_inner.semaphore_waiting_matrix[sem_id].swap_remove(index);
+    }
+    process_inner.semaphore_holding_matrix[sem_id].push(tid);
+}
+
+/// Remove tid from the holding matrix of the semaphore_id
+pub fn remove_from_semaphore_holding_matrix(
+    process_inner: &mut ProcessControlBlockInner,
+    tid: usize,
+    sem_id: usize,
+) {
+    if let Some(index) = process_inner.semaphore_holding_matrix[sem_id]
+        .iter()
+        .position(|&id| id == tid)
+    {
+        process_inner.semaphore_holding_matrix[sem_id].swap_remove(index);
+    }
+}
+
+/// Check whether acquiring the semaphore_id by the task with tid would cause a deadlock
+pub fn check_semaphore_deadlock(
+    process_inner: &ProcessControlBlockInner,
+    tid: usize,
+    sem_id: usize,
+) -> bool {
+    let mut work = process_inner.semaphore_list.iter().map(|sem_opt| {
+        sem_opt.as_ref().map_or(0, |sem| {
+            let inner = sem.inner.exclusive_access();
+            inner.count
+        })
+    }).collect::<Vec<_>>();
+    let allocation_matrix = calc_allocation_matrix(&process_inner.semaphore_holding_matrix, process_inner.thread_count());
+    let mut need_matrix = calc_allocation_matrix(&process_inner.semaphore_waiting_matrix, process_inner.thread_count());
+    for (sem_id, waiting_vec) in process_inner.semaphore_waiting_matrix.iter().enumerate() {
+        work[sem_id] += waiting_vec.len() as isize;
+        assert!(work[sem_id] >= 0);
+    }
+    need_matrix[tid][sem_id] += 1; // simulate the new request
+    check_deadlock(&mut work, &allocation_matrix, &need_matrix)
+}
+
+fn calc_allocation_matrix(record_matrix: &Vec<Vec<usize>>, thread_count: usize) -> Vec<Vec<usize>> {
+    let mut allocation_matrix = vec![vec![0; record_matrix.len()]; thread_count];
+    for (res_id, tids) in record_matrix.iter().enumerate() {
+        for &tid in tids.iter() {
+            allocation_matrix[tid][res_id] += 1;
+        }
+    }
+    allocation_matrix
 }
