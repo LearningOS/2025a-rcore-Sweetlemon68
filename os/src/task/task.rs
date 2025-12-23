@@ -79,6 +79,34 @@ impl TaskControlBlock {
             },
         }
     }
+
+    /// Create a new kernel thread task
+    pub fn new_kernel(
+        process: Arc<ProcessControlBlock>,
+        entry: usize,
+        arg: usize,
+        ustack_base: usize, // Reuse ustack_base for id allocation, though not used for stack
+    ) -> Self {
+        // We still allocate UserRes to maintain TID and consistency with existing structures,
+        // even though a kernel thread doesn't strictly need a user stack.
+        let res = TaskUserRes::new(Arc::clone(&process), ustack_base, true);
+        let trap_cx_ppn = res.trap_cx_ppn();
+        let kstack = kstack_alloc();
+        let kstack_top = kstack.get_top();
+        Self {
+            process: Arc::downgrade(&process),
+            kstack,
+            inner: unsafe {
+                UPSafeCell::new(TaskControlBlockInner {
+                    res: Some(res),
+                    trap_cx_ppn,
+                    task_cx: TaskContext::goto_kernel_task(entry, kstack_top, arg),
+                    task_status: TaskStatus::Ready,
+                    exit_code: None,
+                })
+            },
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq)]

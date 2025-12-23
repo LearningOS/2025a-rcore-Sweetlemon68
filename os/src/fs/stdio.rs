@@ -9,6 +9,9 @@ pub struct Stdin;
 /// stdout file for putting chars to console
 pub struct Stdout;
 
+/// null file that discards all writes and returns EOF on reads
+pub struct NullFile;
+
 impl File for Stdin {
     fn readable(&self) -> bool {
         true
@@ -54,6 +57,21 @@ impl File for Stdout {
         for buffer in user_buf.buffers.iter() {
             print!("{}", core::str::from_utf8(*buffer).unwrap());
         }
+        user_buf.len()
+    }
+}
+
+impl File for NullFile {
+    fn readable(&self) -> bool {
+        true
+    }
+    fn writable(&self) -> bool {
+        true
+    }
+    fn read(&self, _user_buf: UserBuffer) -> usize {
+        0
+    }
+    fn write(&self, user_buf: UserBuffer) -> usize {
         user_buf.len()
     }
 }

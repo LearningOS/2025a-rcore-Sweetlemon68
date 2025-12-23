@@ -1,5 +1,6 @@
 //! Implementation of [`TaskContext`]
 use crate::trap::trap_return;
+use core::arch::global_asm;
 
 #[repr(C)]
 /// task context structure containing some registers
@@ -29,4 +30,27 @@ impl TaskContext {
             s: [0; 12],
         }
     }
+    /// Create a new task context for a kernel thread
+    pub fn goto_kernel_task(entry: usize, kstack_ptr: usize, arg: usize) -> Self {
+        let mut s = [0; 12];
+        s[0] = entry; // s0 = entry point
+        s[1] = arg;   // s1 = argument
+        Self {
+            ra: kernel_thread_entry as usize,
+            sp: kstack_ptr,
+            s,
+        }
+    }
 }
+
+extern "C" {
+    fn kernel_thread_entry();
+}
+
+global_asm!(
+    ".section .text",
+    ".globl kernel_thread_entry",
+    "kernel_thread_entry:",
+    "mv a0, s1", // Move arg (s1) to a0
+    "jr s0",     // Jump to entry (s0)
+);

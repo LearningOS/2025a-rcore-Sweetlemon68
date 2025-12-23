@@ -96,14 +96,18 @@ pub const SYSCALL_SEMAPHORE_DOWN: usize = 470;
 pub const SYSCALL_CONDVAR_CREATE: usize = 471;
 /// condvar_signal syscall
 pub const SYSCALL_CONDVAR_SIGNAL: usize = 472;
-/// condvar_wait syscallca
+/// condvar_wait syscall
 pub const SYSCALL_CONDVAR_WAIT: usize = 473;
+/// io_uring setup syscall
+pub const SYSCALL_IO_URING_SETUP: usize = 600;
 
+mod io_uring;
 mod fs;
 mod process;
 mod sync;
 mod thread;
 
+use io_uring::*;
 use fs::*;
 use process::*;
 use sync::*;
@@ -148,6 +152,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
         SYSCALL_CONDVAR_CREATE => sys_condvar_create(),
         SYSCALL_CONDVAR_SIGNAL => sys_condvar_signal(args[0]),
         SYSCALL_CONDVAR_WAIT => sys_condvar_wait(args[0], args[1]),
+        SYSCALL_IO_URING_SETUP => sys_io_uring_setup(args[0], args[1]),
         SYSCALL_KILL => sys_kill(args[0], args[1] as u32),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
